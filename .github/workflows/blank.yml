@@ -3,7 +3,7 @@ name: Restructure and Build Android App
 on:
   push:
     branches: [ "main" ] # Change to "master" if your default branch uses that name
-  workflow_dispatch: # Allows you to manually trigger this build from the GitHub UI
+  workflow_dispatch:
 
 jobs:
   organize-and-build:
@@ -21,8 +21,7 @@ jobs:
         cache: 'gradle'
 
     # --- RESTRUCTURE SECTION ---
-    # This step maps your loose root files into standard Android Studio paths
-    - name: Structure Android Project Directories
+    - name: Force Valid Android Project Structure
       run: |
         echo "Creating valid Android directory layout..."
         mkdir -p app/src/main/java
@@ -31,38 +30,46 @@ jobs:
         mkdir -p app/src/main/res/drawable
 
         echo "Moving Source Files..."
-        # 1. Move your java/kotlin source code (adjust extension if using .kt)
-        # Matches any loose java files and drops them into the java package directory
-        if ls *.java 1> /dev/null 2>&1; then
-          mv *.java app/src/main/java/
-        fi
+        # Safely move any java or kotlin source files found at root
+        if ls *.java 1> /dev/null 2>&1; then mv *.java app/src/main/java/; fi
+        if ls *.kt 1> /dev/null 2>&1; then mv *.kt app/src/main/java/; fi
 
         echo "Moving Layout & Resource Files..."
-        # 2. Move layouts into res/layout
         if ls *layout*.xml 1> /dev/null 2>&1 || ls activity_*.xml 1> /dev/null 2>&1; then
           mv *layout*.xml app/src/main/res/layout/ 2>/dev/null || true
           mv activity_*.xml app/src/main/res/layout/ 2>/dev/null || true
         fi
         
-        # 3. Move common values like strings.xml, styles.xml, colors.xml
         for val_file in strings.xml styles.xml colors.xml themes.xml; do
-          if [ -f "$val_file" ]; then
-            mv "$val_file" app/src/main/res/values/
-          fi
+          if [ -f "$val_file" ]; then mv "$val_file" app/src/main/res/values/; fi
         done
 
-        # 4. Move images/drawables
-        if ls *.png 1> /dev/null 2>&1 || ls *.xml 1> /dev/null 2>&1; then
-          mv *.png app/src/main/res/drawable/ 2>/dev/null || true
-        fi
+        if ls *.png 1> /dev/null 2>&1; then mv *.png app/src/main/res/drawable/; fi
 
         echo "Moving Core Config Manifest..."
-        # 5. Move AndroidManifest.xml
         if [ -f "AndroidManifest.xml" ]; then
-          mv AndroidManifest.xml app/src/main//
+          mv AndroidManifest.xml app/src/main/
         fi
 
-        echo "Current Workspace Layout:"
+        # --- REPAIR MISSING CONFIGS SYSTEM ---
+        echo "Ensuring settings.gradle includes the app module..."
+        if [ ! -f "settings.gradle" ] && [ ! -f "settings.gradle.kts" ]; then
+          echo "include ':app'" > settings.gradle
+          echo "rootProject.name = 'CampMeds'" >> settings.gradle
+        elif [ -f "settings.gradle" ] && ! grep -q ":app" settings.gradle; then
+          echo "include ':app'" >> settings.gradle
+        fi
+
+        # If a single loose build.gradle exists, map it to the app subproject module
+        if [ -f "build.gradle" ] && [ ! -f "app/build.gradle" ]; then
+          echo "Moving build.gradle to app module..."
+          mv build.gradle app/
+          
+          # Create a basic minimal root build.gradle if missing
+          echo "// Root build file" > build.gradle
+        fi
+
+        echo "Current Workspace Structural Mapping:"
         find . -maxdepth 4 -not -path '*/.*'
 
     # --- COMPILE SECTION ---
@@ -72,8 +79,9 @@ jobs:
     - name: Grant Execute Permission to Gradlew
       run: chmod +x gradlew
 
-    - name: Build Debug APK
-      run: ./gradlew assembleDebug
+    # Run explicit task list generation first to clear context, then build
+    - name: Build Debug APK via App Module
+      run: ./gradlew :app:assembleDebug
 
     - name: Upload Compiled APK Artifact
       uses: actions/upload-artifact@v4
