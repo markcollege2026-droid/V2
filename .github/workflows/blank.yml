@@ -1,0 +1,82 @@
+name: Restructure and Build Android App
+
+on:
+  push:
+    branches: [ "main" ] # Change to "master" if your default branch uses that name
+  workflow_dispatch: # Allows you to manually trigger this build from the GitHub UI
+
+jobs:
+  organize-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Loose Repository Code
+      uses: actions/checkout@v4
+
+    - name: Set up Java JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: 'gradle'
+
+    # --- RESTRUCTURE SECTION ---
+    # This step maps your loose root files into standard Android Studio paths
+    - name: Structure Android Project Directories
+      run: |
+        echo "Creating valid Android directory layout..."
+        mkdir -p app/src/main/java
+        mkdir -p app/src/main/res/layout
+        mkdir -p app/src/main/res/values
+        mkdir -p app/src/main/res/drawable
+
+        echo "Moving Source Files..."
+        # 1. Move your java/kotlin source code (adjust extension if using .kt)
+        # Matches any loose java files and drops them into the java package directory
+        if ls *.java 1> /dev/null 2>&1; then
+          mv *.java app/src/main/java/
+        fi
+
+        echo "Moving Layout & Resource Files..."
+        # 2. Move layouts into res/layout
+        if ls *layout*.xml 1> /dev/null 2>&1 || ls activity_*.xml 1> /dev/null 2>&1; then
+          mv *layout*.xml app/src/main/res/layout/ 2>/dev/null || true
+          mv activity_*.xml app/src/main/res/layout/ 2>/dev/null || true
+        fi
+        
+        # 3. Move common values like strings.xml, styles.xml, colors.xml
+        for val_file in strings.xml styles.xml colors.xml themes.xml; do
+          if [ -f "$val_file" ]; then
+            mv "$val_file" app/src/main/res/values/
+          fi
+        done
+
+        # 4. Move images/drawables
+        if ls *.png 1> /dev/null 2>&1 || ls *.xml 1> /dev/null 2>&1; then
+          mv *.png app/src/main/res/drawable/ 2>/dev/null || true
+        fi
+
+        echo "Moving Core Config Manifest..."
+        # 5. Move AndroidManifest.xml
+        if [ -f "AndroidManifest.xml" ]; then
+          mv AndroidManifest.xml app/src/main//
+        fi
+
+        echo "Current Workspace Layout:"
+        find . -maxdepth 4 -not -path '*/.*'
+
+    # --- COMPILE SECTION ---
+    - name: Set up Gradle Wrapper
+      run: gradle wrapper --gradle-version 8.0
+
+    - name: Grant Execute Permission to Gradlew
+      run: chmod +x gradlew
+
+    - name: Build Debug APK
+      run: ./gradlew assembleDebug
+
+    - name: Upload Compiled APK Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-debug-apk
+        path: app/build/outputs/apk/debug/app-debug.apk
