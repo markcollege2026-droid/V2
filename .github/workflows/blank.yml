@@ -1,90 +1,77 @@
-name: Restructure and Build Android App
+name: Build Android APK From Scratch
 
 on:
   push:
-    branches: [ "main" ] # Change to "master" if your default branch uses that name
-  workflow_dispatch:
+    branches: [ "main", "master" ]
+  workflow_dispatch: # Allows you to manually trigger the build inside the Actions tab
 
 jobs:
-  organize-and-build:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-24.04
 
     steps:
-    - name: Checkout Loose Repository Code
-      uses: actions/checkout@v4
+    - name: Checkout Code Repository
+      uses: actions/checkout@v4.2.2
 
-    - name: Set up Java JDK 17
-      uses: actions/setup-java@v4
+    - name: Initialize Environment JDK 17
+      uses: actions/setup-java@v5
       with:
         java-version: '17'
         distribution: 'temurin'
-        cache: 'gradle'
+        cache: gradle
 
-    # --- RESTRUCTURE SECTION ---
-    - name: Force Valid Android Project Structure
+    - name: Initialize Gradle Environment Tools
+      uses: gradle/actions/setup-gradle@v4
+
+    - name: Automatically Structure Project Layouts
       run: |
-        echo "Creating valid Android directory layout..."
-        mkdir -p app/src/main/java
-        mkdir -p app/src/main/res/layout
-        mkdir -p app/src/main/res/values
+        # 1. Ensure core application and export package pathways exist
+        mkdir -p app/src/main/java/com/campmeds/app/export
+        mkdir -p app/src/test/java/com/campmeds/app
         mkdir -p app/src/main/res/drawable
-
-        echo "Moving Source Files..."
-        # Safely move any java or kotlin source files found at root
-        if ls *.java 1> /dev/null 2>&1; then mv *.java app/src/main/java/; fi
-        if ls *.kt 1> /dev/null 2>&1; then mv *.kt app/src/main/java/; fi
-
-        echo "Moving Layout & Resource Files..."
-        if ls *layout*.xml 1> /dev/null 2>&1 || ls activity_*.xml 1> /dev/null 2>&1; then
-          mv *layout*.xml app/src/main/res/layout/ 2>/dev/null || true
-          mv activity_*.xml app/src/main/res/layout/ 2>/dev/null || true
+        mkdir -p app/src/main/res/values
+        
+        # 2. Safely route loose files if they are sitting on the front porch
+        if [ -f XlsxExporter.kt ]; then
+          mv XlsxExporter.kt app/src/main/java/com/campmeds/app/export/
         fi
         
-        for val_file in strings.xml styles.xml colors.xml themes.xml; do
-          if [ -f "$val_file" ]; then mv "$val_file" app/src/main/res/values/; fi
-        done
-
-        if ls *.png 1> /dev/null 2>&1; then mv *.png app/src/main/res/drawable/; fi
-
-        echo "Moving Core Config Manifest..."
-        if [ -f "AndroidManifest.xml" ]; then
+        find . -maxdepth 1 -name "*Test.kt" -exec mv {} app/src/test/java/com/campmeds/app/ \;
+        find . -maxdepth 1 -name "*.kt" -exec mv {} app/src/main/java/com/campmeds/app/ \;
+        
+        # 3. Safely map XML resource assets if loose
+        find . -maxdepth 1 -name "ic_launcher*.xml" -exec mv {} app/src/main/res/drawable/ \;
+        find . -maxdepth 1 -name "strings.xml" -exec mv {} app/src/main/res/values/ \;
+        find . -maxdepth 1 -name "themes.xml" -exec mv {} app/src/main/res/values/ \;
+        find . -maxdepth 1 -name "colors.xml" -exec mv {} app/src/main/res/values/ \;
+        
+        if [ -f AndroidManifest.xml ]; then
           mv AndroidManifest.xml app/src/main/
         fi
+        
+        # 4. Manifest string safety patch (forces drawable mapping over mipmap flags)
+        TARGET_MANIFEST="app/src/main/AndroidManifest.xml"
+        if [ -f "$TARGET_MANIFEST" ]; then
+          sed -i 's|@mipmap/ic_launcher|@drawable/ic_launcher|g' "$TARGET_MANIFEST"
+        fi
+        
+        echo "Cloud file sweep and path configurations complete!"
 
-        # --- REPAIR MISSING CONFIGS SYSTEM ---
-        echo "Ensuring settings.gradle includes the app module..."
-        if [ ! -f "settings.gradle" ] && [ ! -f "settings.gradle.kts" ]; then
-          echo "include ':app'" > settings.gradle
-          echo "rootProject.name = 'CampMeds'" >> settings.gradle
-        elif [ -f "settings.gradle" ] && ! grep -q ":app" settings.gradle; then
-          echo "include ':app'" >> settings.gradle
+    - name: Generate Gradle Wrapper Executable
+      run: |
+        if [ ! -f gradlew ]; then
+          echo "No local wrapper engine detected. Constructing standard Gradle environment..."
+          gradle wrapper --gradle-version 8.7
         fi
 
-        # If a single loose build.gradle exists, map it to the app subproject module
-        if [ -f "build.gradle" ] && [ ! -f "app/build.gradle" ]; then
-          echo "Moving build.gradle to app module..."
-          mv build.gradle app/
-          
-          # Create a basic minimal root build.gradle if missing
-          echo "// Root build file" > build.gradle
-        fi
-
-        echo "Current Workspace Structural Mapping:"
-        find . -maxdepth 4 -not -path '*/.*'
-
-    # --- COMPILE SECTION ---
-    - name: Set up Gradle Wrapper
-      run: gradle wrapper --gradle-version 8.0
-
-    - name: Grant Execute Permission to Gradlew
+    - name: Authorize Gradle Execution Security
       run: chmod +x gradlew
 
-    # Run explicit task list generation first to clear context, then build
-    - name: Build Debug APK via App Module
-      run: ./gradlew :app:assembleDebug
+    - name: Compile Application Production Package
+      run: ./gradlew :app:assembleDebug --clean
 
-    - name: Upload Compiled APK Artifact
+    - name: Extract Completed Application Package
       uses: actions/upload-artifact@v4
       with:
-        name: app-debug-apk
+        name: CampMeds-Prototype-APK
         path: app/build/outputs/apk/debug/app-debug.apk
